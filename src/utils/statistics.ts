@@ -5,12 +5,14 @@ import type {
   ReviewLabel,
   StatisticsSummary,
 } from "@/types";
+import { collapseDecisions } from "@/utils/decisionHistory";
 
 export function computeStatistics(
   anomalies: Anomaly[],
   decisions: ReviewDecision[]
 ): StatisticsSummary {
-  const decisionMap = new Map(decisions.map((d) => [d.anomalyId, d]));
+  const latestDecisions = collapseDecisions(decisions);
+  const decisionMap = new Map(latestDecisions.map((d) => [d.anomalyId, d]));
 
   const byType: Record<AnomalyType, number> = {
     missing: 0,

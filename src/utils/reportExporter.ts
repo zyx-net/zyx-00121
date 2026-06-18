@@ -9,6 +9,7 @@ import type {
 } from "@/types";
 import { ANOMALY_TYPE_META, REVIEW_LABEL_META } from "@/types";
 import { computeStatistics, formatTimestamp } from "./statistics";
+import { collapseDecisions, getDecisionHistory } from "@/utils/decisionHistory";
 
 interface ExportRow {
   异常编号: string;
@@ -23,6 +24,7 @@ interface ExportRow {
   复核标签: string;
   复核时间: string;
   复核备注: string;
+  历史标签变更: string;
 }
 
 export function exportReportCSV(
@@ -30,7 +32,8 @@ export function exportReportCSV(
   ruleVersion: RuleVersion,
   stats: StatisticsSummary
 ): string {
-  const decisionMap = new Map(batch.decisions.map((d) => [d.anomalyId, d]));
+  const latestDecisions = collapseDecisions(batch.decisions);
+  const decisionMap = new Map(latestDecisions.map((d) => [d.anomalyId, d]));
 
   const headerInfo = [
     ["# 车间传感器质检分析报告"],
@@ -63,6 +66,13 @@ export function exportReportCSV(
 
   const rows: ExportRow[] = batch.anomalies.map((a) => {
     const d = decisionMap.get(a.id);
+    const history = getDecisionHistory(batch.decisions, a.id);
+    const historyStr = history.length > 1
+      ? history.map((h, i) =>
+          `${i + 1}. ${REVIEW_LABEL_META[h.label].name} (${formatTimestamp(h.reviewedAt)})`
+        ).join("; ")
+      : (d ? "无变更" : "-");
+
     return {
       异常编号: a.id,
       异常类型: ANOMALY_TYPE_META[a.type].name,
@@ -76,6 +86,7 @@ export function exportReportCSV(
       复核标签: d ? REVIEW_LABEL_META[d.label].name : "未复核",
       复核时间: d ? formatTimestamp(d.reviewedAt) : "-",
       复核备注: d?.comment ?? "-",
+      历史标签变更: historyStr,
     };
   });
 

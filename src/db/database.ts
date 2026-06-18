@@ -6,6 +6,7 @@ import type {
   Anomaly,
   ReviewDecision,
 } from "@/types";
+export { collapseDecisions, getDecisionHistory } from "@/utils/decisionHistory";
 
 export class SensorQADatabase extends Dexie {
   ruleVersions!: Table<RuleVersion, string>;
@@ -22,6 +23,14 @@ export class SensorQADatabase extends Dexie {
       dataPoints: "id, batchId, sensorName, timestamp",
       anomalies: "id, batchId, type, sensorName, timestamp",
       reviewDecisions: "id, batchId, anomalyId, label",
+    });
+    this.version(2).stores({
+      reviewDecisions: "id, batchId, anomalyId, label, reviewedAt, isSuperseded",
+    }).upgrade(tx => {
+      return tx.table("reviewDecisions").toCollection().modify(dec => {
+        if (dec.isSuperseded === undefined) dec.isSuperseded = false;
+        if (dec.sequence === undefined) dec.sequence = 1;
+      });
     });
   }
 }
@@ -97,21 +106,39 @@ export async function saveReviewDecision(
   batchId: string,
   decision: ReviewDecision
 ): Promise<void> {
-  const existing = await db.reviewDecisions
-    .where("anomalyId")
-    .equals(decision.anomalyId)
-    .first();
+  await db.transaction("rw", db.reviewDecisions, async () => {
+    const existing = await db.reviewDecisions
+      .where("anomalyId")
+      .equals(decision.anomalyId)
+      .sortBy("sequence");
 
-  if (existing) {
-    await db.reviewDecisions.update(existing.id, {
-      label: decision.label,
-      reviewedAt: decision.reviewedAt,
-      comment: decision.comment,
-    });
-  } else {
-    await db.reviewDecisions.put({ ...decision, batchId });
-  }
+    const maxSequence = existing.length > 0
+      ? Math.max(...existing.map(d => d.sequence ?? 1))
+      : 0;
+
+    const previous = existing.find(d => !d.isSuperseded);
+
+    for (const dec of existing) {
+      if (!dec.isSuperseded) {
+        await db.reviewDecisions.update(dec.id, {
+          isSuperseded: true,
+        });
+      }
+    }
+
+    const newDecision: ReviewDecision & { batchId: string } = {
+      ...decision,
+      previousLabel: previous?.label,
+      isSuperseded: false,
+      sequence: maxSequence + 1,
+      batchId,
+    };
+
+    await db.reviewDecisions.put(newDecision);
+  });
 }
+
+
 
 export async function saveRuleVersion(rule: RuleVersion): Promise<void> {
   await db.ruleVersions.put(rule);

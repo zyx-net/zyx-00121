@@ -72,6 +72,9 @@ export interface ReviewDecision {
   label: ReviewLabel;
   reviewedAt: string;
   comment?: string;
+  previousLabel?: ReviewLabel;
+  isSuperseded?: boolean;
+  sequence?: number;
 }
 
 export interface RollbackLog {
