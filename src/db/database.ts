@@ -105,8 +105,8 @@ export async function getAllBatchList(): Promise<
 export async function saveReviewDecision(
   batchId: string,
   decision: ReviewDecision
-): Promise<void> {
-  await db.transaction("rw", db.reviewDecisions, async () => {
+): Promise<ReviewDecision> {
+  return await db.transaction("rw", db.reviewDecisions, async () => {
     const existing = await db.reviewDecisions
       .where("anomalyId")
       .equals(decision.anomalyId)
@@ -135,6 +135,9 @@ export async function saveReviewDecision(
     };
 
     await db.reviewDecisions.put(newDecision);
+
+    const { batchId: _b, ...result } = newDecision;
+    return result;
   });
 }
 

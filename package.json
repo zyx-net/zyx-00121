@@ -11,7 +11,8 @@
     "check": "tsc -b --noEmit",
     "test:regression": "node --import tsx tests/regression.test.ts",
     "test:integration": "node --import tsx tests/integration.test.ts",
-    "test": "npm run test:regression && npm run test:integration"
+    "test:immediate-export": "node --import tsx tests/regression_immediate_export.test.ts",
+    "test": "npm run test:regression && npm run test:immediate-export && npm run test:integration"
   },
   "dependencies": {
     "clsx": "^2.1.1",

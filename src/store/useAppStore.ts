@@ -207,17 +207,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       comment,
     };
 
-    await saveReviewDecision(batchId, decision);
+    const savedDecision = await saveReviewDecision(batchId, decision);
 
-    const existingIdx = currentBatch.decisions.findIndex(
-      (d) => d.anomalyId === anomalyId
-    );
-    const newDecisions = [...currentBatch.decisions];
-    if (existingIdx >= 0) {
-      newDecisions[existingIdx] = decision;
-    } else {
-      newDecisions.push(decision);
-    }
+    const newDecisions = [...currentBatch.decisions, savedDecision];
 
     const newBatch = { ...currentBatch, decisions: newDecisions };
     const stats = computeStatistics(newBatch.anomalies, newBatch.decisions);
@@ -230,28 +222,16 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     const now = new Date().toISOString();
     const newDecisions = [...currentBatch.decisions];
-    const decisionsToSave: ReviewDecision[] = [];
 
     for (const anomalyId of anomalyIds) {
-      const existingIdx = newDecisions.findIndex(
-        (d) => d.anomalyId === anomalyId
-      );
       const decision: ReviewDecision = {
         id: generateId("dec"),
         anomalyId,
         label,
         reviewedAt: now,
       };
-      if (existingIdx >= 0) {
-        newDecisions[existingIdx] = decision;
-      } else {
-        newDecisions.push(decision);
-      }
-      decisionsToSave.push(decision);
-    }
-
-    for (const d of decisionsToSave) {
-      await saveReviewDecision(batchId, d);
+      const savedDecision = await saveReviewDecision(batchId, decision);
+      newDecisions.push(savedDecision);
     }
 
     const newBatch = { ...currentBatch, decisions: newDecisions };
