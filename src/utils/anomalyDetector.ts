@@ -6,6 +6,7 @@ import type {
   SensorRule,
   MissingRule,
 } from "@/types";
+import { generateAnomalyFingerprint } from "@/utils/anomalyFingerprint";
 
 function uid(prefix = "an"): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
@@ -179,5 +180,6 @@ export function detectAnomalies(
   return all.map((an, idx) => ({
     ...an,
     id: `an_${idx + 1}_${Math.random().toString(36).slice(2, 8)}`,
+    fingerprint: generateAnomalyFingerprint(an),
   }));
 }

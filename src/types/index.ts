@@ -64,11 +64,13 @@ export interface Anomaly {
   previousValue?: number;
   nextValue?: number;
   description: string;
+  fingerprint?: string;
 }
 
 export interface ReviewDecision {
   id: string;
   anomalyId: string;
+  anomalyFingerprint?: string;
   label: ReviewLabel;
   reviewedAt: string;
   comment?: string;

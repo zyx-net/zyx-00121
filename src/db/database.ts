@@ -7,6 +7,7 @@ import type {
   ReviewDecision,
 } from "@/types";
 export { collapseDecisions, getDecisionHistory } from "@/utils/decisionHistory";
+import { remapDecisionsAfterReDetect } from "@/utils/anomalyFingerprint";
 
 export class SensorQADatabase extends Dexie {
   ruleVersions!: Table<RuleVersion, string>;
@@ -31,6 +32,10 @@ export class SensorQADatabase extends Dexie {
         if (dec.isSuperseded === undefined) dec.isSuperseded = false;
         if (dec.sequence === undefined) dec.sequence = 1;
       });
+    });
+    this.version(3).stores({
+      anomalies: "id, batchId, type, sensorName, timestamp, fingerprint",
+      reviewDecisions: "id, batchId, anomalyId, anomalyFingerprint, label, reviewedAt, isSuperseded",
     });
   }
 }
@@ -76,7 +81,10 @@ export async function getFullBatch(batchId: string): Promise<Batch | undefined> 
 
   const cleanDP = dataPoints.map(({ batchId: _b, ...rest }) => rest);
   const cleanAN = anomalies.map(({ batchId: _b, ...rest }) => rest);
-  const cleanDEC = decisions.map(({ batchId: _b, ...rest }) => rest);
+  const rawDEC = decisions.map(({ batchId: _b, ...rest }) => rest);
+
+  const remapResult = remapDecisionsAfterReDetect([], cleanAN, rawDEC);
+  const cleanDEC = remapResult.decisions;
 
   return {
     ...batchMeta,
@@ -106,7 +114,7 @@ export async function saveReviewDecision(
   batchId: string,
   decision: ReviewDecision
 ): Promise<ReviewDecision> {
-  return await db.transaction("rw", db.reviewDecisions, async () => {
+  return await db.transaction("rw", db.reviewDecisions, db.anomalies, async () => {
     const existing = await db.reviewDecisions
       .where("anomalyId")
       .equals(decision.anomalyId)
@@ -126,8 +134,20 @@ export async function saveReviewDecision(
       }
     }
 
+    let anomalyFingerprint = decision.anomalyFingerprint;
+    if (!anomalyFingerprint) {
+      const anomaly = await db.anomalies
+        .where("id")
+        .equals(decision.anomalyId)
+        .first();
+      if (anomaly) {
+        anomalyFingerprint = anomaly.fingerprint;
+      }
+    }
+
     const newDecision: ReviewDecision & { batchId: string } = {
       ...decision,
+      anomalyFingerprint,
       previousLabel: previous?.label,
       isSuperseded: false,
       sequence: maxSequence + 1,

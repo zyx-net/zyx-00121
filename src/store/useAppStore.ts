@@ -21,6 +21,7 @@ import { detectAnomalies } from "@/utils/anomalyDetector";
 import { computeStatistics } from "@/utils/statistics";
 import type { StatisticsSummary } from "@/types";
 import { db } from "@/db/database";
+import { remapDecisionsAfterReDetect } from "@/utils/anomalyFingerprint";
 
 interface ToastMessage {
   id: string;
@@ -273,11 +274,30 @@ export const useAppStore = create<AppState>((set, get) => ({
     };
 
     let newAnomalies = batch.anomalies;
+    let updatedDecisions = batch.decisions;
     if (reDetect) {
+      const oldAnomalies = batch.anomalies;
       newAnomalies = detectAnomalies(batch.dataPoints, targetRule);
-      await db.anomalies.where("batchId").equals(batchId).delete();
-      const toSave = newAnomalies.map((a) => ({ ...a, batchId }));
-      if (toSave.length > 0) await db.anomalies.bulkPut(toSave);
+
+      const remapResult = remapDecisionsAfterReDetect(oldAnomalies, newAnomalies, batch.decisions);
+      updatedDecisions = remapResult.decisions;
+
+      await db.transaction("rw", db.anomalies, db.reviewDecisions, async () => {
+        await db.anomalies.where("batchId").equals(batchId).delete();
+        const toSave = newAnomalies.map((a) => ({ ...a, batchId }));
+        if (toSave.length > 0) await db.anomalies.bulkPut(toSave);
+
+        for (const d of remapResult.decisions) {
+          await db.reviewDecisions.update(d.id, {
+            anomalyId: d.anomalyId,
+            anomalyFingerprint: (d as { anomalyFingerprint?: string }).anomalyFingerprint,
+          });
+        }
+      });
+
+      if (remapResult.remappedCount > 0) {
+        get().pushToast("info", `已恢复 ${remapResult.remappedCount} 条复核记录与新异常的关联`);
+      }
     }
 
     const updated: Batch = {
@@ -285,6 +305,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       ruleVersionId: toRuleVersionId,
       status: "rolled_back",
       anomalies: newAnomalies,
+      decisions: updatedDecisions,
       rollbackLogs: [...batch.rollbackLogs, log],
     };
 
