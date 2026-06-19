@@ -5,6 +5,8 @@ import type {
   ReviewLabel,
   RuleVersion,
   RollbackLog,
+  ImportParseMetadata,
+  DataPoint,
 } from "@/types";
 import { generateId } from "@/utils/statistics";
 import {
@@ -50,7 +52,8 @@ interface AppState {
     batchNo: string,
     note: string,
     ruleVersionId: string,
-    dataPoints: Batch["dataPoints"]
+    dataPoints: Batch["dataPoints"],
+    parseMetadata?: ImportParseMetadata
   ) => Promise<Batch>;
   checkBatchExists: (batchNo: string) => Promise<boolean>;
 
@@ -166,7 +169,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ loading: false });
   },
 
-  createBatch: async (batchNo, note, ruleVersionId, dataPoints) => {
+  createBatch: async (batchNo, note, ruleVersionId, dataPoints, parseMetadata) => {
     const rule = await getRuleVersion(ruleVersionId);
     if (!rule) throw new Error("规则版本不存在");
 
@@ -183,11 +186,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       anomalies,
       decisions: [],
       rollbackLogs: [],
+      parseMetadata,
     };
 
     await saveBatchWithData(batch);
     await get().loadBatchList();
-    get().pushToast("success", `批次 ${batchNo} 导入成功，检测到 ${anomalies.length} 个异常`);
+    
+    const conflictCount = parseMetadata?.conflicts?.length || 0;
+    const conflictMsg = conflictCount > 0 ? `，其中 ${conflictCount} 条存在时间解析冲突` : "";
+    get().pushToast("success", `批次 ${batchNo} 导入成功，检测到 ${anomalies.length} 个异常${conflictMsg}`);
 
     const stats = computeStatistics(batch.anomalies, batch.decisions);
     set({ currentBatch: batch, currentStats: stats });

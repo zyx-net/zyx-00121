@@ -10,12 +10,32 @@ import {
   Sparkles,
   FileUp,
   Info,
+  Settings,
+  Clock,
+  History,
 } from "lucide-react";
 import { useAppStore } from "@/store/useAppStore";
-import type { ImportValidationResult } from "@/types";
-import { parseCSVFile, generateSampleCSV } from "@/utils/csvParser";
+import type { ImportValidationResult, TimeParseConfig, TimeFormatPreset } from "@/types";
+import {
+  parseCSVFile,
+  generateSampleCSV,
+  generateMixedFormatSampleCSV,
+  TIME_FORMAT_PRESETS,
+  loadTimeParseConfig,
+  saveTimeParseConfig,
+} from "@/utils/csvParser";
 import { formatNumber } from "@/utils/statistics";
 import { downloadFile } from "@/utils/reportExporter";
+
+const CUSTOM_FORMATS = [
+  "YYYY-MM-DD HH:mm:ss",
+  "YYYY/MM/DD HH:mm:ss",
+  "YYYY-MM-DDTHH:mm:ss",
+  "YYYYMMDD_HHmmss",
+  "YYYY-MM-DD",
+  "DD-MM-YYYY HH:mm:ss",
+  "MM/DD/YYYY HH:mm:ss",
+];
 
 export default function Import() {
   const navigate = useNavigate();
@@ -44,6 +64,9 @@ export default function Import() {
   const [note, setNote] = useState("");
   const [creating, setCreating] = useState(false);
   const [dupCheck, setDupCheck] = useState<"idle" | "checking" | "duplicate" | "ok">("idle");
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  const [timeConfig, setTimeConfig] = useState<TimeParseConfig>(() => loadTimeParseConfig());
 
   useEffect(() => {
     initStore();
@@ -64,7 +87,25 @@ export default function Import() {
 
   const rule = getCurrentRule();
 
-  const processFile = async (f: File) => {
+  const handleTimePresetChange = (preset: TimeFormatPreset) => {
+    const newConfig = { ...timeConfig, preset };
+    setTimeConfig(newConfig);
+    saveTimeParseConfig(newConfig);
+    if (file && rule) {
+      processFile(file, newConfig);
+    }
+  };
+
+  const handleCustomFormatChange = (customFormat: string) => {
+    const newConfig = { ...timeConfig, customFormat };
+    setTimeConfig(newConfig);
+    saveTimeParseConfig(newConfig);
+    if (file && rule) {
+      processFile(file, newConfig);
+    }
+  };
+
+  const processFile = async (f: File, config?: TimeParseConfig) => {
     if (!rule) {
       pushToast("error", "请先在规则配置中创建规则");
       return;
@@ -73,7 +114,7 @@ export default function Import() {
     setValidating(true);
     setValidation(null);
     try {
-      const result = await parseCSVFile(f, rule);
+      const result = await parseCSVFile(f, rule, config || timeConfig);
       setValidation(result);
     } catch (e) {
       pushToast("error", "文件解析失败");
@@ -96,6 +137,12 @@ export default function Import() {
     pushToast("success", "样例数据已下载");
   };
 
+  const handleDownloadMixedSample = () => {
+    const csv = generateMixedFormatSampleCSV();
+    downloadFile(csv, "sensor_mixed_format_sample.csv", "text/csv;charset=utf-8");
+    pushToast("success", "混合格式样例数据已下载");
+  };
+
   const handleCreate = async () => {
     if (!validation || !validation.valid || validation.dataPoints.length === 0) {
       pushToast("error", "数据校验失败，无法导入");
@@ -116,7 +163,8 @@ export default function Import() {
         batchNo.trim(),
         note.trim(),
         currentRuleVersionId,
-        validation.dataPoints
+        validation.dataPoints,
+        validation.parseMetadata
       );
       navigate(`/review/${batch.id}`);
     } finally {
@@ -136,10 +184,16 @@ export default function Import() {
             上传 CSV 时间序列文件进行自动异常检测
           </p>
         </div>
-        <button onClick={handleDownloadSample} className="btn-secondary text-xs">
-          <Download size={14} />
-          下载样例数据
-        </button>
+        <div className="flex gap-2">
+          <button onClick={handleDownloadMixedSample} className="btn-secondary text-xs">
+            <Download size={14} />
+            下载混合格式样例
+          </button>
+          <button onClick={handleDownloadSample} className="btn-secondary text-xs">
+            <Download size={14} />
+            下载标准样例
+          </button>
+        </div>
       </div>
 
       <div className="card p-4 flex items-center justify-between bg-blue-50/50 border-blue-100">
@@ -173,6 +227,139 @@ export default function Import() {
               </option>
             ))}
           </select>
+        )}
+      </div>
+
+      <div className="card p-5 bg-industrial-50/50">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="section-title !mb-0 flex items-center gap-2">
+            <Clock size={16} className="text-primary-600" />
+            时间格式解析配置
+          </h3>
+          <button
+            onClick={() => setShowAdvanced(!showAdvanced)}
+            className="text-xs text-primary-600 hover:text-primary-700 flex items-center gap-1"
+          >
+            <Settings size={14} />
+            {showAdvanced ? "收起选项" : "高级选项"}
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
+          {TIME_FORMAT_PRESETS.map((preset) => (
+            <button
+              key={preset.value}
+              onClick={() => handleTimePresetChange(preset.value)}
+              className={`p-3 rounded-lg border-2 text-left transition-all ${
+                timeConfig.preset === preset.value
+                  ? "border-primary-500 bg-primary-50"
+                  : "border-industrial-200 bg-white hover:border-industrial-300"
+              }`}
+            >
+              <p className={`font-medium text-sm ${
+                timeConfig.preset === preset.value ? "text-primary-700" : "text-industrial-800"
+              }`}>
+                {preset.label}
+              </p>
+              <p className="text-xs text-industrial-500 mt-1">{preset.description}</p>
+            </button>
+          ))}
+        </div>
+
+        {showAdvanced && (
+          <div className="space-y-4 pt-4 border-t border-industrial-200">
+            {timeConfig.preset === "custom" && (
+              <div>
+                <label className="label">选择自定义格式</label>
+                <select
+                  value={timeConfig.customFormat || ""}
+                  onChange={(e) => handleCustomFormatChange(e.target.value)}
+                  className="input"
+                >
+                  <option value="">请选择格式</option>
+                  {CUSTOM_FORMATS.map((fmt) => (
+                    <option key={fmt} value={fmt}>
+                      {fmt}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-industrial-500 mt-1">
+                  选择与您 CSV 文件中时间戳格式匹配的模式
+                </p>
+              </div>
+            )}
+
+            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <p className="text-xs text-yellow-800">
+                <strong>💡 提示：</strong>您选择的时间格式配置会自动保存，下次打开时会沿用上次的选择。
+                如果手动配置与自动识别结果冲突，系统会优先使用您选择的配置，并记录冲突日志。
+              </p>
+            </div>
+          </div>
+        )}
+
+        {validation && validation.parseMetadata && (
+          <div className="mt-4 pt-4 border-t border-industrial-200">
+            <h4 className="text-sm font-medium text-industrial-800 mb-3 flex items-center gap-2">
+              <History size={14} className="text-primary-600" />
+              本次解析统计
+            </h4>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="p-2 bg-white rounded border border-industrial-200">
+                <p className="text-xs text-industrial-500">使用的预设</p>
+                <p className="font-mono text-sm font-bold text-primary-700">
+                  {TIME_FORMAT_PRESETS.find(p => p.value === validation.parseMetadata.timeConfig.preset)?.label}
+                </p>
+              </div>
+              <div className="p-2 bg-white rounded border border-industrial-200">
+                <p className="text-xs text-industrial-500">检测到的格式</p>
+                <p className="font-mono text-sm font-bold text-industrial-700">
+                  {Object.keys(validation.parseMetadata.autoDetectedFormatCounts).length} 种
+                </p>
+              </div>
+              <div className="p-2 bg-white rounded border border-industrial-200">
+                <p className="text-xs text-industrial-500">解析冲突</p>
+                <p className={`font-mono text-sm font-bold ${
+                  validation.parseMetadata.conflicts.length > 0 ? "text-orange-600" : "text-green-600"
+                }`}>
+                  {validation.parseMetadata.conflicts.length} 条
+                </p>
+              </div>
+              <div className="p-2 bg-white rounded border border-industrial-200">
+                <p className="text-xs text-industrial-500">解析错误</p>
+                <p className={`font-mono text-sm font-bold ${
+                  validation.parseMetadata.parseErrors.length > 0 ? "text-red-600" : "text-green-600"
+                }`}>
+                  {validation.parseMetadata.parseErrors.length} 条
+                </p>
+              </div>
+            </div>
+
+            {Object.keys(validation.parseMetadata.autoDetectedFormatCounts).length > 0 && (
+              <div className="mt-3">
+                <p className="text-xs text-industrial-500 mb-2">格式分布：</p>
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(validation.parseMetadata.autoDetectedFormatCounts).map(([format, count]) => (
+                    <span key={format} className="px-2 py-1 bg-industrial-100 text-industrial-700 rounded text-xs">
+                      {format}: {count} 行
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {validation.parseMetadata.conflicts.length > 0 && (
+              <div className="mt-3 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+                <p className="text-xs text-orange-800 font-medium mb-2">
+                  ⚠️ 检测到 {validation.parseMetadata.conflicts.length} 条时间解析冲突
+                </p>
+                <p className="text-xs text-orange-700">
+                  自动识别与手动配置的解析结果不一致，已优先使用您选择的「{TIME_FORMAT_PRESETS.find(p => p.value === validation.parseMetadata.timeConfig.preset)?.label}」格式。
+                  详细冲突记录将随报告一起导出。
+                </p>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
@@ -369,10 +556,13 @@ export default function Import() {
             </code>
           </p>
           <p>
-            时间戳支持格式: YYYY-MM-DD HH:mm:ss、YYYY/MM/DD HH:mm:ss、ISO 8601
+            时间戳支持格式: YYYY-MM-DD HH:mm:ss、YYYY/MM/DD HH:mm:ss、ISO 8601、Unix 时间戳（秒/毫秒）、自定义格式
           </p>
           <p>
             sensorName 必须与规则配置中的传感器名称完全匹配，否则将提示「未知传感器」
+          </p>
+          <p className="text-primary-600 font-medium">
+            🆕 导出的报告将包含：原始时间戳、标准化时间、时间格式说明、解析冲突日志
           </p>
         </div>
       </div>

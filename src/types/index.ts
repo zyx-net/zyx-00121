@@ -47,11 +47,52 @@ export interface RuleVersion {
   missingRules: MissingRule[];
 }
 
+export type TimeFormatPreset = "auto" | "unix_seconds" | "unix_milliseconds" | "custom";
+
+export interface TimeParseConfig {
+  preset: TimeFormatPreset;
+  customFormat?: string;
+  columnName?: string;
+}
+
+export interface TimeParseConflictLog {
+  id: string;
+  rowNumber: number;
+  rawValue: string;
+  autoDetectedFormat: string;
+  userSelectedFormat: string;
+  autoParsedTimestamp: string | null;
+  userParsedTimestamp: string | null;
+  finalTimestamp: string | null;
+  finalFormatUsed: string;
+  conflictReason: string;
+  resolvedAt: string;
+}
+
 export interface DataPoint {
   id: string;
   timestamp: string;
+  rawTimestamp: string;
   sensorName: string;
   value: number;
+  timeParseNote?: string;
+}
+
+export interface ImportParseMetadata {
+  timeConfig: TimeParseConfig;
+  conflicts: TimeParseConflictLog[];
+  autoDetectedFormatCounts: Record<string, number>;
+  parseErrors: Array<{ row: number; rawValue: string; message: string }>;
+  importedAt: string;
+}
+
+export interface ImportValidationResult {
+  valid: boolean;
+  errors: ImportError[];
+  warnings: string[];
+  dataPoints: DataPoint[];
+  rowCount: number;
+  parseMetadata: ImportParseMetadata;
 }
 
 export interface Anomaly {
@@ -99,6 +140,7 @@ export interface Batch {
   anomalies: Anomaly[];
   decisions: ReviewDecision[];
   rollbackLogs: RollbackLog[];
+  parseMetadata?: ImportParseMetadata;
 }
 
 export interface ImportValidationResult {

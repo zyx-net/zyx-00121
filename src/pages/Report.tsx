@@ -10,6 +10,8 @@ import {
   CheckCircle2,
   XCircle,
   MinusCircle,
+  FileJson,
+  History,
 } from "lucide-react";
 import { useAppStore } from "@/store/useAppStore";
 import type { Anomaly, RuleVersion } from "@/types";
@@ -22,8 +24,11 @@ import {
   buildRollbackTrail,
   downloadFile,
   exportReportCSV,
+  exportTimeParseAuditLog,
   generateReportFilename,
+  generateAuditLogFilename,
 } from "@/utils/reportExporter";
+import { TIME_FORMAT_PRESETS } from "@/utils/csvParser";
 import { getFullBatch, getRuleVersion } from "@/db/database";
 import type { Batch } from "@/types";
 import { computeStatistics } from "@/utils/statistics";
@@ -77,6 +82,13 @@ export default function Report() {
     pushToast("success", "报告已导出");
   };
 
+  const handleExportAuditLog = () => {
+    if (!batch) return;
+    const csv = exportTimeParseAuditLog(batch);
+    downloadFile(csv, generateAuditLogFilename(batch.batchNo), "text/csv;charset=utf-8");
+    pushToast("success", "时间解析审计日志已导出");
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -125,6 +137,11 @@ export default function Report() {
           <button onClick={() => window.print()} className="btn-secondary text-xs">
             <Printer size={14} /> 打印
           </button>
+          {batch?.parseMetadata?.conflicts && batch.parseMetadata.conflicts.length > 0 && (
+            <button onClick={handleExportAuditLog} className="btn-secondary text-xs">
+              <FileJson size={14} /> 导出审计日志
+            </button>
+          )}
           <button onClick={handleExport} className="btn-primary text-xs">
             <Download size={14} /> 导出 CSV
           </button>
@@ -163,6 +180,96 @@ export default function Report() {
           </div>
         )}
       </div>
+
+      {batch.parseMetadata && (
+        <div className="card p-5 bg-gradient-to-br from-purple-50/50 via-white to-blue-50">
+          <h3 className="section-title !mb-3 flex items-center gap-2">
+            <History size={18} className="text-purple-600" />
+            时间解析元数据（可追溯）
+          </h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+            <div>
+              <p className="text-xs text-industrial-500 uppercase tracking-wide font-medium mb-1">使用的预设</p>
+              <p className="text-sm font-semibold text-purple-700">
+                {TIME_FORMAT_PRESETS.find(p => p.value === batch.parseMetadata.timeConfig.preset)?.label || batch.parseMetadata.timeConfig.preset}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-industrial-500 uppercase tracking-wide font-medium mb-1">自定义格式</p>
+              <p className="text-sm font-mono text-industrial-700">
+                {batch.parseMetadata.timeConfig.customFormat || "-"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-industrial-500 uppercase tracking-wide font-medium mb-1">解析冲突数</p>
+              <p className={`text-sm font-bold ${batch.parseMetadata.conflicts.length > 0 ? "text-orange-600" : "text-green-600"}`}>
+                {batch.parseMetadata.conflicts.length} 条
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-industrial-500 uppercase tracking-wide font-medium mb-1">解析错误数</p>
+              <p className={`text-sm font-bold ${batch.parseMetadata.parseErrors.length > 0 ? "text-red-600" : "text-green-600"}`}>
+                {batch.parseMetadata.parseErrors.length} 条
+              </p>
+            </div>
+          </div>
+
+          {Object.keys(batch.parseMetadata.autoDetectedFormatCounts).length > 0 && (
+            <div className="mb-4">
+              <p className="text-xs text-industrial-500 font-medium mb-2">自动检测格式分布：</p>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(batch.parseMetadata.autoDetectedFormatCounts).map(([format, count]) => (
+                  <span key={format} className="px-2 py-1 bg-purple-100 text-purple-700 rounded text-xs font-mono">
+                    {format}: {count} 行
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {batch.parseMetadata.conflicts.length > 0 && (
+            <div className="p-3 bg-orange-50 border border-orange-200 rounded-lg">
+              <p className="text-xs font-semibold text-orange-700 mb-2 flex items-center gap-1">
+                <AlertTriangle size={12} />
+                时间解析冲突说明
+              </p>
+              <p className="text-xs text-orange-700 mb-3">
+                自动识别与手动配置的解析结果存在冲突，已优先使用用户选择的「{TIME_FORMAT_PRESETS.find(p => p.value === batch.parseMetadata.timeConfig.preset)?.label}」格式。
+                点击「导出审计日志」可查看完整的冲突记录。
+              </p>
+              <div className="max-h-32 overflow-auto rounded bg-white/50 border border-orange-100">
+                <table className="w-full text-xs">
+                  <thead className="bg-orange-100 sticky top-0">
+                    <tr>
+                      <th className="text-left py-1.5 px-2 w-16">行号</th>
+                      <th className="text-left py-1.5 px-2">原始值</th>
+                      <th className="text-left py-1.5 px-2">自动识别</th>
+                      <th className="text-left py-1.5 px-2">最终使用</th>
+                      <th className="text-left py-1.5 px-2">冲突原因</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {batch.parseMetadata.conflicts.slice(0, 5).map((c) => (
+                      <tr key={c.id} className="border-t border-orange-100">
+                        <td className="py-1 px-2 font-mono">{c.rowNumber}</td>
+                        <td className="py-1 px-2 font-mono">{c.rawValue}</td>
+                        <td className="py-1 px-2 font-mono text-xs">{c.autoParsedTimestamp?.slice(0, 19) || "-"}</td>
+                        <td className="py-1 px-2 font-mono text-xs text-orange-700 font-semibold">{c.finalTimestamp?.slice(0, 19) || "-"}</td>
+                        <td className="py-1 px-2 text-xs">{c.conflictReason}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {batch.parseMetadata.conflicts.length > 5 && (
+                  <p className="text-xs text-orange-500 py-1 px-2 bg-orange-50">
+                    仅显示前 5 条，共 {batch.parseMetadata.conflicts.length} 条冲突记录
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <StatCard
@@ -282,6 +389,11 @@ export default function Report() {
             <button onClick={() => window.print()} className="btn-secondary text-xs">
               <Printer size={14} /> 打印报告
             </button>
+            {batch?.parseMetadata?.conflicts && batch.parseMetadata.conflicts.length > 0 && (
+              <button onClick={handleExportAuditLog} className="btn-secondary text-xs">
+                <FileJson size={14} /> 导出审计日志
+              </button>
+            )}
             <button onClick={handleExport} className="btn-primary text-xs">
               <Download size={14} /> 导出 CSV
             </button>

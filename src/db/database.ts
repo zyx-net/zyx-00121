@@ -37,6 +37,10 @@ export class SensorQADatabase extends Dexie {
       anomalies: "id, batchId, type, sensorName, timestamp, fingerprint",
       reviewDecisions: "id, batchId, anomalyId, anomalyFingerprint, label, reviewedAt, isSuperseded",
     });
+    this.version(4).stores({
+      batches: "id, batchNo, importedAt, ruleVersionId, status, parseMetadata",
+      dataPoints: "id, batchId, sensorName, timestamp, rawTimestamp",
+    });
   }
 }
 
@@ -56,9 +60,15 @@ export async function saveBatchWithData(batch: Batch): Promise<void> {
       anomalies: [],
       decisions: [],
       rollbackLogs: batch.rollbackLogs,
+      parseMetadata: batch.parseMetadata,
     });
 
-    const dpWithBatch = batch.dataPoints.map((dp) => ({ ...dp, batchId: batch.id }));
+    const dpWithBatch = batch.dataPoints.map((dp) => ({ 
+      ...dp, 
+      batchId: batch.id,
+      rawTimestamp: dp.rawTimestamp,
+      timeParseNote: dp.timeParseNote,
+    }));
     if (dpWithBatch.length > 0) await db.dataPoints.bulkPut(dpWithBatch);
 
     const anWithBatch = batch.anomalies.map((a) => ({ ...a, batchId: batch.id }));
@@ -91,6 +101,7 @@ export async function getFullBatch(batchId: string): Promise<Batch | undefined> 
     dataPoints: cleanDP,
     anomalies: cleanAN,
     decisions: cleanDEC,
+    parseMetadata: batchMeta.parseMetadata,
   };
 }
 
