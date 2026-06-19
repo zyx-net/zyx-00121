@@ -11,6 +11,7 @@ import type {
 } from "@/types";
 import { generateId } from "@/utils/statistics";
 import { generateSourceId } from "@/utils/perSourceTimeConfig";
+import { detectAndStripBOM, readFileWithBOMHandling } from "@/utils/bomUtils";
 
 export const TIME_FORMAT_PRESETS: Array<{ value: TimeFormatPreset; label: string; description: string }> = [
   { value: "auto", label: "自动识别", description: "智能检测时间格式" },
@@ -205,38 +206,84 @@ export async function parseCSVFile(
 ): Promise<ImportValidationResult> {
   const config = timeConfig || loadTimeParseConfig();
   const sourceHash = generateSourceId(file.name);
-  return new Promise((resolve) => {
-    Papa.parse<CSVRow>(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (results) => {
-        resolve(processParsedData(results.data, ruleVersion, results.errors, config, sourceHash));
-      },
-      error: (err) => {
-        resolve({
-          valid: false,
-          errors: [
-            {
-              row: 0,
-              column: "file",
-              message: `CSV 解析失败: ${err.message}`,
-              type: "invalid_value",
+
+  try {
+    const { text, hasBOM } = await readFileWithBOMHandling(file);
+    const warnings: string[] = [];
+    if (hasBOM) {
+      warnings.push("检测到 UTF-8 BOM（Windows 常见格式），已自动处理");
+    }
+
+    return new Promise((resolve) => {
+      Papa.parse<CSVRow>(text, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (results) => {
+          const result = processParsedData(results.data, ruleVersion, results.errors, config, sourceHash);
+          resolve({
+            ...result,
+            warnings: [...warnings, ...result.warnings],
+            parseMetadata: {
+              ...result.parseMetadata,
+              hasBOM,
+              sourceName: file.name,
+              sourceType: "csv",
             },
-          ],
-          warnings: [],
-          dataPoints: [],
-          rowCount: 0,
-          parseMetadata: {
-            timeConfig: config,
-            conflicts: [],
-            autoDetectedFormatCounts: {},
-            parseErrors: [],
-            importedAt: new Date().toISOString(),
-          },
-        });
-      },
+          });
+        },
+        error: (err) => {
+          resolve({
+            valid: false,
+            errors: [
+              {
+                row: 0,
+                column: "file",
+                message: `CSV 解析失败: ${err.message}`,
+                type: "invalid_value",
+              },
+            ],
+            warnings,
+            dataPoints: [],
+            rowCount: 0,
+            parseMetadata: {
+              timeConfig: config,
+              conflicts: [],
+              autoDetectedFormatCounts: {},
+              parseErrors: [],
+              importedAt: new Date().toISOString(),
+              hasBOM,
+              sourceName: file.name,
+              sourceType: "csv",
+            },
+          });
+        },
+      });
     });
-  });
+  } catch (e) {
+    return {
+      valid: false,
+      errors: [
+        {
+          row: 0,
+          column: "file",
+          message: `文件读取失败: ${(e as Error).message}`,
+          type: "invalid_value",
+        },
+      ],
+      warnings: [],
+      dataPoints: [],
+      rowCount: 0,
+      parseMetadata: {
+        timeConfig: config,
+        conflicts: [],
+        autoDetectedFormatCounts: {},
+        parseErrors: [],
+        importedAt: new Date().toISOString(),
+        sourceName: file.name,
+        sourceType: "csv",
+      },
+    };
+  }
 }
 
 export function processParsedData(

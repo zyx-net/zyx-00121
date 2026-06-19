@@ -237,7 +237,12 @@ export default function Import() {
         note.trim(),
         currentRuleVersionId,
         validation.dataPoints,
-        validation.parseMetadata
+        validation.parseMetadata,
+        {
+          valid: validation.valid,
+          errors: validation.errors,
+          rowCount: validation.rowCount,
+        }
       );
       navigate(`/review/${batch.id}`);
     } finally {

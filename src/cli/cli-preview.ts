@@ -8,6 +8,7 @@ import { processParsedRows, detectFieldMapping } from "../utils/jsonParser";
 import { generateSourceId } from "../utils/perSourceTimeConfig";
 import { detectAnomalies } from "../utils/anomalyDetector";
 import { generateId } from "../utils/statistics";
+import { detectAndStripBOM, UTF8_BOM } from "../utils/bomUtils";
 
 import type {
   RuleVersion,
@@ -163,11 +164,13 @@ function parseArgs(argv: string[]): {
   format: "csv" | "json" | "auto";
   timePreset: TimeFormatPreset;
   customFormat: string | undefined;
+  exportPath: string | undefined;
+  showFinalColumns: boolean;
 } {
   const args = argv.slice(2);
   if (args.length === 0) {
     console.error(`${RED}Error: File path is required${R}`);
-    console.error(`Usage: cli-preview.ts <file-path> [--format csv|json] [--time-preset auto|unix_seconds|unix_milliseconds|custom] [--custom-format "YYYY-MM-DD HH:mm:ss"]`);
+    console.error(`Usage: cli-preview.ts <file-path> [--format csv|json] [--time-preset auto|unix_seconds|unix_milliseconds|custom] [--custom-format "YYYY-MM-DD HH:mm:ss"] [--export output.json] [--show-final-columns]`);
     process.exit(1);
   }
 
@@ -175,6 +178,8 @@ function parseArgs(argv: string[]): {
   let format: "csv" | "json" | "auto" = "auto";
   let timePreset: TimeFormatPreset = "auto";
   let customFormat: string | undefined;
+  let exportPath: string | undefined;
+  let showFinalColumns = false;
 
   let i = 0;
   while (i < args.length) {
@@ -197,6 +202,12 @@ function parseArgs(argv: string[]): {
     } else if (args[i] === "--custom-format" && i + 1 < args.length) {
       customFormat = args[i + 1];
       i += 2;
+    } else if (args[i] === "--export" && i + 1 < args.length) {
+      exportPath = args[i + 1];
+      i += 2;
+    } else if (args[i] === "--show-final-columns") {
+      showFinalColumns = true;
+      i++;
     } else if (!args[i].startsWith("--")) {
       filePath = args[i];
       i++;
@@ -216,7 +227,7 @@ function parseArgs(argv: string[]): {
     process.exit(1);
   }
 
-  return { filePath, format, timePreset, customFormat };
+  return { filePath, format, timePreset, customFormat, exportPath, showFinalColumns };
 }
 
 function detectFormat(filePath: string, forced?: "csv" | "json" | "auto"): DataSourceType {
@@ -283,7 +294,8 @@ function runPrecheck(
   rawData: Array<Record<string, unknown>>,
   ruleVersion: RuleVersion,
   timeConfig: TimeParseConfig,
-  sourceHash: string
+  sourceHash: string,
+  hasBOM: boolean
 ): PrecheckResult {
   const fieldMapping = detectFieldMapping(rawData as Array<Record<string, unknown>>);
 
@@ -301,6 +313,10 @@ function runPrecheck(
   } else {
     validationResult = processParsedRows(rawData as Array<Record<string, unknown>>, ruleVersion, timeConfig, sourceHash);
   }
+
+  validationResult.parseMetadata.hasBOM = hasBOM;
+  validationResult.parseMetadata.sourceName = sourceName;
+  validationResult.parseMetadata.sourceType = sourceType;
 
   const anomalies = detectAnomalies(validationResult.dataPoints, ruleVersion);
 
@@ -360,6 +376,7 @@ function renderPreview(result: PrecheckResult): void {
     kvLine("Valid", result.validationResult.valid ? "✔ YES" : "✘ NO", CYAN, result.validationResult.valid ? GREEN : RED),
     kvLine("Total Rows", String(result.validationResult.rowCount), CYAN, WHITE),
     kvLine("Data Points", String(result.validationResult.dataPoints.length), CYAN, WHITE),
+    kvLine("UTF-8 BOM", result.validationResult.parseMetadata.hasBOM ? "✔ DETECTED (Windows format)" : "✘ NONE", CYAN, result.validationResult.parseMetadata.hasBOM ? BLUE : DIM),
   ]);
   console.log();
 
@@ -499,10 +516,73 @@ function renderPreview(result: PrecheckResult): void {
     printBox(warnLines);
     console.log();
   }
+
+  console.log(sectionTitle("FINAL WRITE COLUMNS"));
+  const finalCols = ["id", "timestamp", "sensorName", "value", "status", "anomalies", "rawTimestamp", "timeParseNote"];
+  const fWidths = [26, 20, 16, 10, 12, 24, 24, 30];
+  const fHeader = finalCols.map((c, i) => c.padEnd(fWidths[i])).join(` ${CYAN}${V}${R} `);
+  const fSep = fWidths.map((w) => H.repeat(w)).join(`${CYAN}${X}${R}`);
+
+  console.log(`${CYAN}${LJ}${H.repeat(fWidths.reduce((a, b) => a + b, 0) + (fWidths.length - 1) * 3)}${RJ}${R}`);
+  console.log(`${V} ${BOLD}${WHITE}${fHeader}${R} ${CYAN}${V}${R}`);
+  console.log(`${CYAN}${LJ}${fSep}${RJ}${R}`);
+
+  for (const dp of result.validationResult.dataPoints.slice(0, 5)) {
+    const cells = [
+      dp.id.padEnd(fWidths[0]),
+      formatTimestampLocal(dp.timestamp).padEnd(fWidths[1]),
+      dp.sensorName.padEnd(fWidths[2]),
+      dp.value.toFixed(3).padEnd(fWidths[3]),
+      dp.status.padEnd(fWidths[4]),
+      (dp.anomalies?.join(",") || "(none)").substring(0, fWidths[5] - 1).padEnd(fWidths[5]),
+      dp.rawTimestamp.substring(0, fWidths[6] - 1).padEnd(fWidths[6]),
+      (dp.timeParseNote || "(none)").substring(0, fWidths[7] - 1).padEnd(fWidths[7]),
+    ];
+    console.log(`${V} ${cells.join(` ${CYAN}${V}${R} `)} ${CYAN}${V}${R}`);
+  }
+  console.log(`${CYAN}${BL}${H.repeat(fWidths.reduce((a, b) => a + b, 0) + (fWidths.length - 1) * 3)}${BR}${R}`);
+  console.log();
+}
+
+function exportResult(result: PrecheckResult, exportPath: string): void {
+  const exportData = {
+    exportVersion: "1.0.0",
+    exportedAt: new Date().toISOString(),
+    sourceName: result.sourceName,
+    sourceType: result.sourceType,
+    hasBOM: result.validationResult.parseMetadata.hasBOM,
+    timeConfig: result.timeParsePreview.config,
+    fieldMapping: result.fieldMapping,
+    anomalySummary: result.anomalySummary,
+    keyColumnsPreview: result.keyColumnsPreview,
+    timeConflicts: result.timeParsePreview.conflicts,
+    validationResult: {
+      valid: result.validationResult.valid,
+      errors: result.validationResult.errors,
+      warnings: result.validationResult.warnings,
+      rowCount: result.validationResult.rowCount,
+      parseMetadata: result.validationResult.parseMetadata,
+    },
+    dataPoints: result.validationResult.dataPoints.map((dp) => ({
+      id: dp.id,
+      timestamp: dp.timestamp,
+      sensorName: dp.sensorName,
+      value: dp.value,
+      status: dp.status,
+      anomalies: dp.anomalies,
+      rawTimestamp: dp.rawTimestamp,
+      timeParseNote: dp.timeParseNote,
+      sourceId: dp.sourceId,
+      ruleVersionId: dp.ruleVersionId,
+    })),
+  };
+
+  fs.writeFileSync(exportPath, JSON.stringify(exportData, null, 2), "utf-8");
+  console.log(`${GREEN}✔ Exported to: ${exportPath}${R}`);
 }
 
 function main(): void {
-  const { filePath, format, timePreset, customFormat } = parseArgs(process.argv);
+  const { filePath, format, timePreset, customFormat, exportPath, showFinalColumns } = parseArgs(process.argv);
 
   const resolvedPath = path.resolve(filePath);
 
@@ -511,13 +591,15 @@ function main(): void {
     process.exit(1);
   }
 
-  let content: string;
+  let rawContent: string;
   try {
-    content = fs.readFileSync(resolvedPath, "utf-8");
+    rawContent = fs.readFileSync(resolvedPath, "utf-8");
   } catch (e) {
     console.error(`${RED}Error reading file: ${(e as Error).message}${R}`);
     process.exit(1);
   }
+
+  const { text: content, hasBOM } = detectAndStripBOM(rawContent);
 
   const sourceType = detectFormat(resolvedPath, format);
   const sourceName = path.basename(resolvedPath);
@@ -529,6 +611,10 @@ function main(): void {
   };
 
   const ruleVersion = createDefaultRule();
+
+  if (hasBOM) {
+    console.log(`${BLUE}ℹ UTF-8 BOM detected (Windows format), automatically stripped${R}\n`);
+  }
 
   let rawData: Array<Record<string, unknown>>;
 
@@ -564,8 +650,13 @@ function main(): void {
     process.exit(1);
   }
 
-  const precheckResult = runPrecheck(sourceType, sourceName, rawData, ruleVersion, timeConfig, sourceHash);
+  const precheckResult = runPrecheck(sourceType, sourceName, rawData, ruleVersion, timeConfig, sourceHash, hasBOM);
   renderPreview(precheckResult);
+
+  if (exportPath) {
+    exportResult(precheckResult, path.resolve(exportPath));
+  }
+
   process.exit(0);
 }
 

@@ -7,12 +7,14 @@ import {
   History,
   FileBarChart2,
   Activity,
+  Database,
 } from "lucide-react";
 
 const navItems = [
   { to: "/", label: "仪表盘", icon: LayoutDashboard, end: true },
   { to: "/rules", label: "规则配置", icon: Settings2 },
   { to: "/import", label: "数据导入", icon: FileUp },
+  { to: "/precheck", label: "导入预检工作台", icon: Database },
   { to: "/history", label: "历史记录", icon: History },
 ];
 

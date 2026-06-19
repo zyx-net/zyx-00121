@@ -6,6 +6,7 @@ import Import from "@/pages/Import";
 import Review from "@/pages/Review";
 import History from "@/pages/History";
 import Report from "@/pages/Report";
+import PrecheckWorkbench from "@/pages/PrecheckWorkbench";
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/rules" element={<Rules />} />
           <Route path="/import" element={<Import />} />
+          <Route path="/precheck" element={<PrecheckWorkbench />} />
           <Route path="/review/:batchId" element={<Review />} />
           <Route path="/history" element={<History />} />
           <Route path="/report/:batchId" element={<Report />} />

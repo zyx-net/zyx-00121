@@ -11,6 +11,7 @@ import type {
 import { detectTimeFormat, parseTimestampWithFormat, loadTimeParseConfig } from "@/utils/csvParser";
 import { generateSourceId } from "@/utils/perSourceTimeConfig";
 import { generateId } from "@/utils/statistics";
+import { detectAndStripBOM, readFileWithBOMHandling } from "@/utils/bomUtils";
 
 const TIMESTAMP_ALIASES = ["timestamp", "time", "ts"];
 const SENSOR_ALIASES = ["sensor", "sensorName"];
@@ -52,7 +53,11 @@ export async function parseJSONFile(
   const sourceHash = generateSourceId(file.name);
 
   try {
-    const text = await file.text();
+    const { text, hasBOM } = await readFileWithBOMHandling(file);
+    const warnings: string[] = [];
+    if (hasBOM) {
+      warnings.push("检测到 UTF-8 BOM（Windows 常见格式），已自动处理");
+    }
     let parsed: unknown;
     try {
       parsed = JSON.parse(text);
@@ -67,7 +72,7 @@ export async function parseJSONFile(
             type: "invalid_value",
           },
         ],
-        warnings: [],
+        warnings,
         dataPoints: [],
         rowCount: 0,
         parseMetadata: {
@@ -76,6 +81,9 @@ export async function parseJSONFile(
           autoDetectedFormatCounts: {},
           parseErrors: [],
           importedAt: new Date().toISOString(),
+          hasBOM,
+          sourceName: file.name,
+          sourceType: "json",
         },
       };
     }
@@ -92,7 +100,7 @@ export async function parseJSONFile(
             type: "invalid_value",
           },
         ],
-        warnings: [],
+        warnings,
         dataPoints: [],
         rowCount: 0,
         parseMetadata: {
@@ -101,11 +109,24 @@ export async function parseJSONFile(
           autoDetectedFormatCounts: {},
           parseErrors: [],
           importedAt: new Date().toISOString(),
+          hasBOM,
+          sourceName: file.name,
+          sourceType: "json",
         },
       };
     }
 
-    return processParsedRows(rows, ruleVersion, config, sourceHash);
+    const result = processParsedRows(rows, ruleVersion, config, sourceHash);
+    return {
+      ...result,
+      warnings: [...warnings, ...result.warnings],
+      parseMetadata: {
+        ...result.parseMetadata,
+        hasBOM,
+        sourceName: file.name,
+        sourceType: "json",
+      },
+    };
   } catch (e) {
     return {
       valid: false,
@@ -126,6 +147,8 @@ export async function parseJSONFile(
         autoDetectedFormatCounts: {},
         parseErrors: [],
         importedAt: new Date().toISOString(),
+        sourceName: file.name,
+        sourceType: "json",
       },
     };
   }
@@ -134,14 +157,23 @@ export async function parseJSONFile(
 export function parseJSONString(
   jsonStr: string,
   ruleVersion: RuleVersion,
-  timeConfig?: TimeParseConfig
+  timeConfig?: TimeParseConfig,
+  sourceHash?: string,
+  sourceName?: string
 ): ImportValidationResult {
   const config = timeConfig || loadTimeParseConfig();
-  const sourceHash = generateSourceId("json_string");
+  const actualSourceHash = sourceHash || generateSourceId(sourceName || "json_string");
+  const actualSourceName = sourceName || "json_string";
+
+  const { text: cleanedStr, hasBOM } = detectAndStripBOM(jsonStr);
+  const warnings: string[] = [];
+  if (hasBOM) {
+    warnings.push("检测到 UTF-8 BOM（Windows 常见格式），已自动处理");
+  }
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(jsonStr);
+    parsed = JSON.parse(cleanedStr);
   } catch (e) {
     return {
       valid: false,
@@ -153,7 +185,7 @@ export function parseJSONString(
           type: "invalid_value",
         },
       ],
-      warnings: [],
+      warnings,
       dataPoints: [],
       rowCount: 0,
       parseMetadata: {
@@ -162,6 +194,9 @@ export function parseJSONString(
         autoDetectedFormatCounts: {},
         parseErrors: [],
         importedAt: new Date().toISOString(),
+        hasBOM,
+        sourceName: actualSourceName,
+        sourceType: "json",
       },
     };
   }
@@ -178,7 +213,7 @@ export function parseJSONString(
           type: "invalid_value",
         },
       ],
-      warnings: [],
+      warnings,
       dataPoints: [],
       rowCount: 0,
       parseMetadata: {
@@ -187,11 +222,24 @@ export function parseJSONString(
         autoDetectedFormatCounts: {},
         parseErrors: [],
         importedAt: new Date().toISOString(),
+        hasBOM,
+        sourceName: actualSourceName,
+        sourceType: "json",
       },
     };
   }
 
-  return processParsedRows(rows, ruleVersion, config, sourceHash);
+  const result = processParsedRows(rows, ruleVersion, config, actualSourceHash);
+  return {
+    ...result,
+    warnings: [...warnings, ...result.warnings],
+    parseMetadata: {
+      ...result.parseMetadata,
+      hasBOM,
+      sourceName: actualSourceName,
+      sourceType: "json",
+    },
+  };
 }
 
 export function processParsedRows(

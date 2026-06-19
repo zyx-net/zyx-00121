@@ -76,6 +76,11 @@ export interface DataPoint {
   sensorName: string;
   value: number;
   timeParseNote?: string;
+  status?: ReviewLabel | "unreviewed" | "ok" | "anomaly";
+  anomalies?: string[];
+  sourceId?: string;
+  ruleVersionId?: string;
+  batchId?: string;
 }
 
 export interface ImportParseMetadata {
@@ -84,6 +89,9 @@ export interface ImportParseMetadata {
   autoDetectedFormatCounts: Record<string, number>;
   parseErrors: Array<{ row: number; rawValue: string; message: string }>;
   importedAt: string;
+  hasBOM?: boolean;
+  sourceName?: string;
+  sourceType?: DataSourceType;
 }
 
 export interface ImportValidationResult {
@@ -246,6 +254,64 @@ export const REVIEW_LABEL_META: Record<
     textClass: "text-slate-700",
   },
 };
+
+export type ImportOperationStatus =
+  | "pending"
+  | "previewing"
+  | "importing"
+  | "completed"
+  | "failed"
+  | "rolling_back"
+  | "rolled_back";
+
+export type ImportErrorCategory =
+  | "file_access_error"
+  | "parse_error"
+  | "duplicate_batch"
+  | "duplicate_primary_key"
+  | "permission_denied"
+  | "validation_error"
+  | "database_error"
+  | "unknown_error";
+
+export interface ImportConflictDetail {
+  rowNumber: number;
+  primaryKey: string;
+  existingRecordId?: string;
+  conflictType: "duplicate_batch_no" | "duplicate_sensor_timestamp" | "duplicate_data_point_id";
+  adoptedRule: "skip" | "overwrite" | "abort";
+  message: string;
+}
+
+export interface ImportOperationLog {
+  id: string;
+  operationId: string;
+  batchNo?: string;
+  sourceName: string;
+  sourceType: DataSourceType;
+  status: ImportOperationStatus;
+  startedAt: string;
+  completedAt?: string;
+  errorCategory?: ImportErrorCategory;
+  errorMessage?: string;
+  adoptedRules: Array<{
+    ruleType: string;
+    ruleDescription: string;
+    affectedRecords: number;
+  }>;
+  conflicts: ImportConflictDetail[];
+  timeConfig: TimeParseConfig;
+  recordCounts: {
+    totalRows: number;
+    validRows: number;
+    invalidRows: number;
+    skippedRows: number;
+    importedRows: number;
+  };
+  hasBOM?: boolean;
+  userId?: string;
+  metadata?: Record<string, unknown>;
+}
 
 export const ANOMALY_TYPE_META: Record<
   AnomalyType,

@@ -15,8 +15,9 @@
     "test:rollback-redetect": "node --import tsx tests/regression_rollback_redetect.test.ts",
     "test:time-parsing": "node --import tsx tests/regression_time_parsing.test.ts",
     "test:import-precheck": "node --import tsx tests/regression_import_precheck.test.ts",
+    "test:bom-json": "node --import tsx tests/regression_bom_json.test.ts",
     "cli-preview": "node --import tsx src/cli/cli-preview.ts",
-    "test": "npm run test:regression && npm run test:immediate-export && npm run test:rollback-redetect && npm run test:time-parsing && npm run test:import-precheck && npm run test:integration"
+    "test": "npm run test:regression && npm run test:immediate-export && npm run test:rollback-redetect && npm run test:time-parsing && npm run test:import-precheck && npm run test:bom-json && npm run test:integration"
   },
   "dependencies": {
     "clsx": "^2.1.1",

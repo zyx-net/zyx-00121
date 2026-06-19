@@ -18,6 +18,7 @@ import { detectFieldMapping, processParsedRows } from "@/utils/jsonParser";
 import { generateSourceId, loadPerSourceConfig } from "@/utils/perSourceTimeConfig";
 import { detectAnomalies } from "@/utils/anomalyDetector";
 import { generateId } from "@/utils/statistics";
+import { detectAndStripBOM, readFileWithBOMHandling } from "@/utils/bomUtils";
 
 const TIMESTAMP_ALIASES = ["timestamp", "time", "ts"];
 const SENSOR_ALIASES = ["sensor", "sensorName"];
@@ -56,8 +57,19 @@ export async function precheckCSV(
   timeConfig?: TimeParseConfig
 ): Promise<PrecheckResult> {
   const config = timeConfig || loadPerSourceConfig(file.name) || loadTimeParseConfig();
+
+  let hasBOM = false;
+  let text = "";
+  try {
+    const result = await readFileWithBOMHandling(file);
+    hasBOM = result.hasBOM;
+    text = result.text;
+  } catch {
+    return precheckFromRows([], "csv", file.name, ruleVersion, config);
+  }
+
   const rows: Array<Record<string, unknown>> = await new Promise((resolve) => {
-    Papa.parse(file, {
+    Papa.parse(text, {
       header: true,
       skipEmptyLines: true,
       complete: (results) => {
@@ -68,7 +80,18 @@ export async function precheckCSV(
       },
     });
   });
-  return precheckFromRows(rows, "csv", file.name, ruleVersion, config);
+
+  const precheckResult = precheckFromRows(rows, "csv", file.name, ruleVersion, config);
+  precheckResult.validationResult.parseMetadata.hasBOM = hasBOM;
+  precheckResult.validationResult.parseMetadata.sourceName = file.name;
+  precheckResult.validationResult.parseMetadata.sourceType = "csv";
+  if (hasBOM) {
+    precheckResult.validationResult.warnings = [
+      "检测到 UTF-8 BOM（Windows 常见格式），已自动处理",
+      ...precheckResult.validationResult.warnings,
+    ];
+  }
+  return precheckResult;
 }
 
 export async function precheckJSON(
@@ -77,7 +100,17 @@ export async function precheckJSON(
   timeConfig?: TimeParseConfig
 ): Promise<PrecheckResult> {
   const config = timeConfig || loadPerSourceConfig(file.name) || loadTimeParseConfig();
-  const text = await file.text();
+
+  let hasBOM = false;
+  let text = "";
+  try {
+    const result = await readFileWithBOMHandling(file);
+    hasBOM = result.hasBOM;
+    text = result.text;
+  } catch {
+    return precheckFromRows([], "json", file.name, ruleVersion, config);
+  }
+
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -85,7 +118,18 @@ export async function precheckJSON(
     return precheckFromRows([], "json", file.name, ruleVersion, config);
   }
   const rows = extractJSONArray(parsed) || [];
-  return precheckFromRows(rows, "json", file.name, ruleVersion, config);
+
+  const precheckResult = precheckFromRows(rows, "json", file.name, ruleVersion, config);
+  precheckResult.validationResult.parseMetadata.hasBOM = hasBOM;
+  precheckResult.validationResult.parseMetadata.sourceName = file.name;
+  precheckResult.validationResult.parseMetadata.sourceType = "json";
+  if (hasBOM) {
+    precheckResult.validationResult.warnings = [
+      "检测到 UTF-8 BOM（Windows 常见格式），已自动处理",
+      ...precheckResult.validationResult.warnings,
+    ];
+  }
+  return precheckResult;
 }
 
 export function precheckFromRows(
