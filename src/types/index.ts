@@ -143,12 +143,67 @@ export interface Batch {
   parseMetadata?: ImportParseMetadata;
 }
 
-export interface ImportValidationResult {
-  valid: boolean;
-  errors: ImportError[];
-  warnings: string[];
-  dataPoints: DataPoint[];
-  rowCount: number;
+export type DataSourceType = "csv" | "json";
+
+export interface FieldMappingInfo {
+  detectedFields: string[];
+  mappedFields: {
+    timestamp: string | null;
+    sensorName: string | null;
+    value: string | null;
+  };
+  unmappedFields: string[];
+  missingFields: string[];
+  suggestions: Record<string, string[]>;
+}
+
+export interface TimeParsePreviewItem {
+  rowNumber: number;
+  rawValue: string;
+  detectedFormat: string;
+  parsedTimestamp: string | null;
+  isConflict: boolean;
+  conflictReason?: string;
+  finalFormatUsed: string;
+}
+
+export interface AnomalySummaryPreview {
+  totalAnomalies: number;
+  byType: Record<string, number>;
+  bySensor: Record<string, number>;
+}
+
+export interface KeyColumnPreviewRow {
+  rowNumber: number;
+  rawTimestamp: string;
+  standardizedTimestamp: string;
+  sensorName: string;
+  value: number;
+  timeFormatUsed: string;
+  parseNote?: string;
+}
+
+export interface PrecheckResult {
+  sourceType: DataSourceType;
+  sourceName: string;
+  fieldMapping: FieldMappingInfo;
+  timeParsePreview: {
+    config: TimeParseConfig;
+    formatDistribution: Record<string, number>;
+    conflicts: TimeParseConflictLog[];
+    previewRows: TimeParsePreviewItem[];
+    parseErrorCount: number;
+  };
+  anomalySummary: AnomalySummaryPreview;
+  keyColumnsPreview: KeyColumnPreviewRow[];
+  validationResult: ImportValidationResult;
+}
+
+export interface PerSourceTimeConfigEntry {
+  sourceId: string;
+  sourceName: string;
+  config: TimeParseConfig;
+  updatedAt: string;
 }
 
 export interface ImportError {

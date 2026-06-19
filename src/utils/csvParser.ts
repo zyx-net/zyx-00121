@@ -10,6 +10,7 @@ import type {
   ImportParseMetadata,
 } from "@/types";
 import { generateId } from "@/utils/statistics";
+import { generateSourceId } from "@/utils/perSourceTimeConfig";
 
 export const TIME_FORMAT_PRESETS: Array<{ value: TimeFormatPreset; label: string; description: string }> = [
   { value: "auto", label: "自动识别", description: "智能检测时间格式" },
@@ -203,12 +204,13 @@ export async function parseCSVFile(
   timeConfig?: TimeParseConfig
 ): Promise<ImportValidationResult> {
   const config = timeConfig || loadTimeParseConfig();
+  const sourceHash = generateSourceId(file.name);
   return new Promise((resolve) => {
     Papa.parse<CSVRow>(file, {
       header: true,
       skipEmptyLines: true,
       complete: (results) => {
-        resolve(processParsedData(results.data, ruleVersion, results.errors, config));
+        resolve(processParsedData(results.data, ruleVersion, results.errors, config, sourceHash));
       },
       error: (err) => {
         resolve({
@@ -237,11 +239,12 @@ export async function parseCSVFile(
   });
 }
 
-function processParsedData(
+export function processParsedData(
   rows: CSVRow[],
   ruleVersion: RuleVersion,
   parseErrors: Papa.ParseError[],
-  timeConfig: TimeParseConfig
+  timeConfig: TimeParseConfig,
+  sourceHash?: string
 ): ImportValidationResult {
   const errors: ImportError[] = [];
   const warnings: string[] = [];
@@ -359,7 +362,7 @@ function processParsedData(
     }
 
     dataPoints.push({
-      id: `dp_${rowNum}_${Math.random().toString(36).slice(2, 10)}`,
+      id: sourceHash ? `dp_${sourceHash}_${rowNum}` : `dp_${rowNum}_${Math.random().toString(36).slice(2, 10)}`,
       timestamp: finalIso,
       rawTimestamp: tsRaw,
       sensorName,
